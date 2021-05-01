@@ -25,6 +25,7 @@ EFI_STATUS GetMemoryMap(struct MemoryMap* map) {
   }
 
   map->map_size = map->buffer_size;
+  // gBS はブートサービス (OS を起動するために必要な機能を提供) を表わすグローバル変数
   return gBS->GetMemoryMap(
     &map->map_size,
     (EFI_MEMORY_DESCRIPTOR*)map->buffer,
@@ -216,6 +217,9 @@ EFI_STATUS EFIAPI UefiMain(
     }
   }
 
+
+  /* UEFI にある GOP (Graphics Output Protocl) を取得して画面描画する */
+
   EFI_GRAPHICS_OUTPUT_PROTOCOL* gop;
   status = OpenGOP(image_handle, &gop);
   if (EFI_ERROR(status)) {
@@ -238,6 +242,10 @@ EFI_STATUS EFIAPI UefiMain(
     frame_buffer[i] = 255;
   }
 
+
+  /* カーネルファイルを読み込む */
+
+  // カーネルファイルを開く
   EFI_FILE_PROTOCOL* kernel_file;
   status = root_dir->Open(
     root_dir, &kernel_file, L"\\kernel.elf",
@@ -247,6 +255,7 @@ EFI_STATUS EFIAPI UefiMain(
     Halt();
   }
 
+  // ファイル情報を取得する
   UINTN file_info_size = sizeof(EFI_FILE_INFO) + sizeof(CHAR16) * 12;
   UINT8 file_info_buffer[file_info_size];
   status = kernel_file->GetInfo(
@@ -257,9 +266,11 @@ EFI_STATUS EFIAPI UefiMain(
     Halt();
   }
 
+  // ファイルサイズを取得する
   EFI_FILE_INFO* file_info = (EFI_FILE_INFO*)file_info_buffer;
   UINTN kernel_file_size = file_info->FileSize;
 
+  // ファイルを格納するメモリ領域を確保する
   EFI_PHYSICAL_ADDRESS kernel_base_addr = 0x100000;
   status = gBS->AllocatePages(
     AllocateAddress, EfiLoaderData,
@@ -268,12 +279,17 @@ EFI_STATUS EFIAPI UefiMain(
     Print(L"failed to allocate pages: %r", status);
     Halt();
   }
+
+  // ファイルを読み込む
   status = kernel_file->Read(kernel_file, &kernel_file_size, (VOID*)kernel_base_addr);
   if (EFI_ERROR(status)) {
     Print(L"error: %r", status);
     Halt();
   }
   Print(L"Kernel: 0x%0lx (%lu bytes)\n", kernel_base_addr, kernel_file_size);
+
+
+  /* カーネル起動前にブートサービスを停止させる */
 
   status = gBS->ExitBootServices(image_handle, memmap.map_key);
   if (EFI_ERROR(status)) {
@@ -289,8 +305,13 @@ EFI_STATUS EFIAPI UefiMain(
     }
   }
 
+
+  /* カーネルを起動する */
+
+  // メモリ上のエントリポイントの場所を計算する
   UINT64 entry_addr = *(UINT64*)(kernel_base_addr + 24);
 
+  // カーネルに渡す、描画に必要な情報
   struct FrameBufferConfig config = {
     (UINT8*)gop->Mode->FrameBufferBase,
     gop->Mode->Info->PixelsPerScanLine,
@@ -308,6 +329,8 @@ EFI_STATUS EFIAPI UefiMain(
       Print(L"Unimplemented pixel format: %d\n", gop->Mode->Info->PixelFormat);
       Halt();
   }
+
+  // エントリポイントを関数ポインタにキャストし、呼び出す
   typedef void EntryPointType(const struct FrameBufferConfig*);
   EntryPointType* entry_point = (EntryPointType*)entry_addr;
   entry_point(&config);
