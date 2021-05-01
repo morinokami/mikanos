@@ -1,6 +1,4 @@
 edk2/
-mnt/
 x86_64-elf/
-disk.img
 
 venv/
