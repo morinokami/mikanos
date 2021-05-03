@@ -18,9 +18,6 @@
 #include "usb/xhci/xhci.hpp"
 #include "usb/xhci/trb.hpp"
 
-void operator delete(void *obj) noexcept {
-}
-
 const PixelColor kDesktopBGColor{45, 118, 237};
 const PixelColor kDesktopFGColor{255, 255, 255};
 
@@ -80,7 +77,7 @@ extern "C" void KernelMain(FrameBufferConfig& frame_buffer_config) {
     case kPixelBGRResv8BitPerColor:
       pixel_writer = new(pixel_writer_buf)
         BGRResv8BitPerColorPixelWriter{frame_buffer_config};
-        break;
+      break;
   }
 
   const int kFrameWidth = frame_buffer_config.horizontal_resolution;
@@ -98,7 +95,7 @@ extern "C" void KernelMain(FrameBufferConfig& frame_buffer_config) {
                 {0, kFrameHeight - 50},
                 {kFrameWidth / 5, 50},
                 {80, 80, 80});
-  FillRectangle(*pixel_writer,
+  DrawRectangle(*pixel_writer,
                 {10, kFrameHeight - 40},
                 {30, 30},
                 {160, 160, 160});
@@ -109,15 +106,19 @@ extern "C" void KernelMain(FrameBufferConfig& frame_buffer_config) {
   printk("Welcome to MikanOS!\n");
   SetLogLevel(kWarn);
 
+  mouse_cursor = new(mouse_cursor_buf) MouseCursor{
+    pixel_writer, kDesktopBGColor, {300, 200}
+  };
+
   // OCI デバイスを列挙する
   auto err = pci::ScanAllBus();
   Log(kDebug, "ScanAllBus: %s\n", err.Name());
 
   for (int i = 0; i < pci::num_device; ++i) {
     const auto& dev = pci::devices[i];
-    auto vendor_id = pci::ReadVendorId(dev.bus, dev.device, dev.function);
+    auto vendor_id = pci::ReadVendorId(dev);
     auto class_code = pci::ReadClassCode(dev.bus, dev.device, dev.function);
-    printk("%d.%d.%d: vend %04x, class %08x, head %02x",
+    Log(kDebug, "%d.%d.%d: vend %04x, class %08x, head %02x\n",
       dev.bus, dev.device, dev.function,
       vendor_id, class_code, dev.header_type);
   }
@@ -143,10 +144,10 @@ extern "C" void KernelMain(FrameBufferConfig& frame_buffer_config) {
   const WithError<uint64_t> xhc_bar = pci::ReadBar(*xhc_dev, 0);
   Log(kDebug, "ReadBar: %s\n", xhc_bar.error.Name());
   const uint64_t xhc_mmio_base = xhc_bar.value & ~static_cast<uint64_t>(0xf);
-  Log(kDebug, "xHC mmio_base = %08l\n", xhc_mmio_base);
+  Log(kDebug, "xHC mmio_base = %08lx\n", xhc_mmio_base);
 
   // xHC を初期化する
-  usb::xhci::Controller xhc(xhc_mmio_base);
+  usb::xhci::Controller xhc{xhc_mmio_base};
 
   if (0x8086 == pci::ReadVendorId(*xhc_dev)) {
     SwitchEhci2Xhci(*xhc_dev);
@@ -184,5 +185,9 @@ extern "C" void KernelMain(FrameBufferConfig& frame_buffer_config) {
     }
   }
 
+  while (1) __asm__("hlt");
+}
+
+extern "C" void __cxa_pure_virtual() {
   while (1) __asm__("hlt");
 }
